@@ -1,19 +1,3 @@
-"""
-Local GOST Toolkit — Tkinter UI
-
-Capabilities:
-- Hash text/files with GOST R 34.11-2012: 256 or 512 bit
-- Generate GOST 34.10-2012 keypairs
-- Sign & verify messages (sign uses private key; verify uses public key)
-- Encrypt & decrypt text using Kuznechik or Magma in CTR mode (key=32 bytes, IV=8 bytes)
-
-Notes:
-- CTR requires a unique IV for every encryption with the same key
-- Sign/verify hashes your message with GOST R 34.11-2012 before applying the signature
-
-Dependencies: pip install gostcrypto==1.2.5
-"""
-
 import tkinter as tk
 from tkinter import ttk, filedialog
 from tkinter import scrolledtext
