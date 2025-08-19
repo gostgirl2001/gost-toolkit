@@ -290,7 +290,7 @@ def do_verify():
         msg_bytes = _sign_binary_payload if _sign_binary_payload is not None else sign_msg.get().encode()
         sig_hex = sig_only(sig_out.get())
         ok = verify_message(sv_bits.get(), pub_in.get(), sig_hex, msg_bytes)
-        sig_out.set(('✅ VALID\n' if ok else '❌ INVALID\n') + sig_hex)
+        sig_out.set(('✓ VALID\n' if ok else '✗ INVALID\n') + sig_hex)
         set_status("Verification successful" if ok else "Verification failed")
     except Exception as e:
         sig_out.set(f'ERROR: {e}')
