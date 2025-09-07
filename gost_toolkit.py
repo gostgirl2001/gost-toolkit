@@ -5,6 +5,8 @@ import base64, binascii, secrets, re
 import subprocess, tempfile, os
 from typing import Optional, List, Dict
 
+OPENSSL_BIN = "/usr/local/bin/openssl-gost" if os.path.exists("/usr/local/bin/openssl-gost") else "openssl"
+
 # GOST backend
 try:
     from gostcrypto import gosthash, gostsignature, gostcipher
@@ -82,7 +84,7 @@ def decrypt(alg_key: str, key_hex: str, iv_hex: str, b64_text: str) -> bytes:
     return bytes(c.decrypt(bytearray(raw)))
 
 # OpenSSL CMS helpers
-def _run(cmd: List[str], data: Optional[bytes] = None, env: Optional[Dict[str,str]] = None) -> str:
+def _run(cmd: List[str], data: Optional[bytes] = None, env: Optional[Dict[str, str]] = None) -> str:
     p = subprocess.Popen(
         cmd, stdin=subprocess.PIPE if data else None,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env or os.environ.copy()
@@ -107,7 +109,7 @@ def cms_sign(data: bytes, cert_path: str, key_path: str, out_path: str,
     with tempfile.NamedTemporaryFile(delete=False) as tmp_in:
         tmp_in.write(data); tmp_in.flush(); in_path = tmp_in.name
     cmd = [
-        "openssl", "cms", "-sign", "-engine", "gost",
+        OPENSSL_BIN, "cms", "-sign", "-engine", "gost",
         "-binary", "-md", md, "-in", in_path,
         "-signer", cert_path, "-inkey", key_path,
         "-outform", "DER", "-nosmimecap"
@@ -131,8 +133,8 @@ def cms_sign(data: bytes, cert_path: str, key_path: str, out_path: str,
 
 def cms_verify(sig_path: str, data_path_detached: Optional[str] = None,
                ca_file: Optional[str] = None) -> dict:
-    verify_cmd = ["openssl","cms","-verify","-engine","gost",
-                  "-inform","DER","-binary","-in",sig_path]
+    verify_cmd = [OPENSSL_BIN, "cms", "-verify", "-engine", "gost",
+                  "-inform", "DER", "-binary", "-in", sig_path]
     if sig_path.lower().endswith(".p7s"):
         if not data_path_detached:
             raise ValueError("Detached signature requires original data.")
@@ -141,13 +143,13 @@ def cms_verify(sig_path: str, data_path_detached: Optional[str] = None,
     _run(verify_cmd)
     chain_ok, chain_message = True, ""
     if ca_file:
-        vc = ["openssl","cms","-verify","-engine","gost",
-              "-inform","DER","-binary","-in",sig_path,"-CAfile",ca_file]
+        vc = [OPENSSL_BIN, "cms", "-verify", "-engine", "gost",
+              "-inform", "DER", "-binary", "-in", sig_path, "-CAfile", ca_file]
         if sig_path.lower().endswith(".p7s"):
             vc += ["-content", data_path_detached]
         try: _run(vc)
         except Exception as e: chain_ok, chain_message = False, str(e)
-    info = _run(["openssl","cms","-cmsout","-inform","DER","-in",sig_path,"-print"])
+    info = _run([OPENSSL_BIN, "cms", "-cmsout", "-inform", "DER", "-in", sig_path, "-print"])
     subject=issuer=serial=digest=signing_time=None
     for line in info.splitlines():
         t=line.strip()
@@ -174,7 +176,7 @@ TC26_OIDS = {
 
 def cert_show_oids(cert_path: str) -> str:
     inform="PEM" if _is_pem(cert_path) else "DER"
-    dump=_run(["openssl","asn1parse","-in",cert_path,"-inform",inform,"-i"])
+    dump=_run([OPENSSL_BIN, "asn1parse", "-in", cert_path, "-inform", inform, "-i"])
     found: Dict[str,str] = {}
     for line in dump.splitlines():
         if "OBJECT" in line and "1.2.643.7.1.1." in line:
@@ -184,20 +186,22 @@ def cert_show_oids(cert_path: str) -> str:
     return "Detected TC26 OIDs:\n"+"\n".join(f"  {k} — {v}" for k,v in found.items())
 
 def cert_pem_to_der(in_path: str, out_path: str) -> str:
-    _run(["openssl","x509","-in",in_path,"-inform","PEM","-out",out_path,"-outform","DER"]); return out_path
+    _run([OPENSSL_BIN, "x509", "-in", in_path, "-inform", "PEM", "-out", out_path, "-outform", "DER"]); return out_path
 
 def cert_der_to_pem(in_path: str, out_path: str) -> str:
-    _run(["openssl","x509","-in",in_path,"-inform","DER","-out",out_path,"-outform","PEM"]); return out_path
+    _run([OPENSSL_BIN, "x509", "-in", in_path, "-inform", "DER", "-out", out_path, "-outform", "PEM"]); return out_path
 
 def key_pem_to_der_pkcs8(in_path: str, out_path: str, password: Optional[str] = None) -> str:
-    cmd=["openssl","pkcs8","-topk8","-nocrypt","-in",in_path,"-out",out_path,"-outform","DER"]; env=None
-    if password: cmd=["openssl","pkcs8","-topk8","-in",in_path,"-passin","env:KEY_PASS",
-                      "-out",out_path,"-outform","DER","-nocrypt"]; env=os.environ.copy(); env["KEY_PASS"]=password
+    cmd=[OPENSSL_BIN, "pkcs8", "-topk8", "-nocrypt", "-in", in_path, "-out", out_path, "-outform", "DER"]; env=None
+    if password:
+        cmd=[OPENSSL_BIN, "pkcs8", "-topk8", "-in", in_path, "-passin", "env:KEY_PASS",
+             "-out", out_path, "-outform", "DER", "-nocrypt"]; env=os.environ.copy(); env["KEY_PASS"]=password
     _run(cmd,env=env); return out_path
 
 def key_der_to_pem_pkcs8(in_path: str, out_path: str, password: Optional[str] = None) -> str:
-    cmd=["openssl","pkcs8","-inform","DER","-in",in_path,"-out",out_path,"-outform","PEM"]; env=None
-    if password: cmd+=["-passin","env:KEY_PASS"]; env=os.environ.copy(); env["KEY_PASS"]=password
+    cmd=[OPENSSL_BIN, "pkcs8", "-inform", "DER", "-in", in_path, "-out", out_path, "-outform", "PEM"]; env=None
+    if password:
+        cmd+=["-passin","env:KEY_PASS"]; env=os.environ.copy(); env["KEY_PASS"]=password
     _run(cmd,env=env); return out_path
 
 # UI scaffolding
@@ -413,6 +417,16 @@ def sig_only(s: str) -> str:
             return t
     return s.strip()
 
+def _maybe_autoset_bits_from_pub():
+    try:
+        pub_bytes = unhex(pub_in.get())
+        if len(pub_bytes) == 64:
+            sv_bits.set(256)
+        elif len(pub_bytes) == 128:
+            sv_bits.set(512)
+    except Exception:
+        pass
+
 def do_sign():
     global _sign_binary_payload
     try:
@@ -420,22 +434,23 @@ def do_sign():
         sig = sign_message(sv_bits.get(), priv_in.get(), msg_bytes)
         sig_out.set(sig)
         _sign_binary_payload = msg_bytes
-        set_status("Signature successful")
+        set_status("✓ Signature successful")
     except Exception as e:
-        sig_out.set(f'ERROR: {e}')
-        set_status("Signature error")
+        sig_out.set(f'✗ ERROR: {e}')
+        set_status("✗ Signature error")
 
 def do_verify():
     global _sign_binary_payload
     try:
+        _maybe_autoset_bits_from_pub()
         msg_bytes = _sign_binary_payload if _sign_binary_payload is not None else sign_msg.get().encode()
         sig_hex = sig_only(sig_out.get())
         ok = verify_message(sv_bits.get(), pub_in.get(), sig_hex, msg_bytes)
         sig_out.set(('✓ VALID\n' if ok else '✗ INVALID\n') + sig_hex)
-        set_status("Verification successful" if ok else "Verification failed")
+        set_status("✓ Verification successful" if ok else "✗ Verification failed")
     except Exception as e:
-        sig_out.set(f'ERROR: {e}')
-        set_status("Verification error")
+        sig_out.set(f'✗ ERROR: {e}')
+        set_status("✗ Verification error")
 
 def load_msg_from_file():
     global _sign_binary_payload
@@ -488,19 +503,21 @@ def do_encrypt():
         plain = _enc_binary_plain if _enc_binary_plain is not None else pt_in.get().encode()
         ct = encrypt(alg_var.get(), key_in.get(), iv_in.get(), plain)
         ct_out.set(ct)
-        set_status("Encryption successful")
+        set_status("✓ Encryption successful")
     except Exception as e:
-        ct_out.set(f'ERROR: {e}')
-        set_status("Encryption error")
+        ct_out.set(f'✗ ERROR: encryption failed ({e}). '
+                   f'Ensure key is 32 bytes hex, IV is 8 bytes hex.')
+        set_status("✗ Encryption error")
 
 def do_decrypt():
     try:
         pt = decrypt(alg_var.get(), key_in.get(), iv_in.get(), ct_out.get())
         pt_in.set(pt.decode(errors="replace"))
-        set_status("Decryption successful")
+        set_status("✓ Decryption successful")
     except Exception as e:
-        ct_out.set(f'ERROR: {e}')
-        set_status("Decryption error")
+        ct_out.set(f'✗ ERROR: decryption failed ({e}). '
+                   f'Common causes: wrong key/IV, invalid base64, or corrupted ciphertext.')
+        set_status("✗ Decryption error")
 
 def load_plain_from_file():
     global _enc_binary_plain
@@ -538,7 +555,7 @@ ttk.Button(enc_btns, text='Load Plaintext…', command=load_plain_from_file).pac
 ttk.Button(enc_btns, text='Encrypt →', command=do_encrypt).pack(side='left', padx=5)
 ttk.Button(enc_btns, text='← Decrypt', command=do_decrypt).pack(side='left', padx=5)
 
-# PKCS#7 Sign (CMS) — separate tab
+# PKCS#7 Sign (CMS)
 cms_sign_tab = ttk.Frame(nb)
 nb.add(cms_sign_tab, text='PKCS#7 Sign')
 
@@ -547,7 +564,7 @@ cms_cert_fp  = FilePicker(cms_sign_tab, 'Signer certificate (PEM/DER)',
                           filetypes=(("Cert files","*.pem *.cer *.crt *.der"),("All files","*.*")))
 cms_key_fp   = FilePicker(cms_sign_tab, 'Signer private key (PEM/DER/PKCS#8)',
                           filetypes=(("Key files","*.pem *.key *.der *.p8"),("All files","*.*")))
-cms_chain_fp = FilePicker(cms_sign_tab, '(Optional: Embed CA chain from PEM file',
+cms_chain_fp = FilePicker(cms_sign_tab, 'Optional: CA chain to embed (PEM)',
                           filetypes=(("PEM files","*.pem"),("All files","*.*")))
 for w in (cms_data_fp, cms_cert_fp, cms_key_fp, cms_chain_fp):
     w.pack(fill='x', pady=2)
@@ -570,7 +587,7 @@ def _do_cms_sign(detached: bool):
         key_path  = cms_key_fp.get_path()
         chain_path = cms_chain_fp.get_path() or None
         if not (data_path and cert_path and key_path):
-            cms_sign_out.set("ERROR: select data, signer certificate, and private key files.")
+            cms_sign_out.set("✗ ERROR: select data, signer certificate, and private key files.")
             return
         with open(data_path, 'rb') as f:
             data = f.read()
@@ -594,10 +611,10 @@ def _do_cms_sign(detached: bool):
         mode = "DETACHED (.p7s)" if detached else "ATTACHED (.p7m)"
         md = "md_gost12_512" if dgst_bits.get()==512 else "md_gost12_256"
         cms_sign_out.set(f"✓ Signed [{mode}, {md}]\nSaved: {saved}")
-        set_status("CMS signing successful")
+        set_status("✓ CMS signing successful")
     except Exception as e:
         cms_sign_out.set(f"✗ CMS sign error:\n{e}")
-        set_status("CMS signing error")
+        set_status("✗ CMS signing error")
 
 btn_row = ttk.Frame(cms_sign_tab); btn_row.pack(anchor='w', pady=6)
 ttk.Button(btn_row, text='Sign (Detached .p7s) →', command=lambda: _do_cms_sign(True)).pack(side='left', padx=8)
@@ -615,7 +632,7 @@ cms_det_fp   = FilePicker(cms_verify_tab, 'Original data (required for .p7s)',
                           filetypes=(("All files","*.*"),))
 cms_det_fp.pack(fill='x', pady=2)
 
-cms_ca_fp    = FilePicker(cms_verify_tab, '(Optional) Embed CA bundle for chain verification (PEM file)',
+cms_ca_fp    = FilePicker(cms_verify_tab, 'Optional: CA bundle (PEM) for chain validation',
                           filetypes=(("PEM files","*.pem"),("All files","*.*")))
 cms_ca_fp.pack(fill='x', pady=2)
 
@@ -626,12 +643,12 @@ def do_cms_verify():
     try:
         sig_path = cms_sig_fp.get_path()
         if not sig_path:
-            cms_verify_out.set("ERROR: select a .p7m or .p7s file.")
+            cms_verify_out.set("✗ ERROR: select a .p7m or .p7s file.")
             return
         data_path = cms_det_fp.get_path() or None
         ca_path = cms_ca_fp.get_path() or None
         if sig_path.lower().endswith(".p7s") and not data_path:
-            cms_verify_out.set("ERROR: detached .p7s requires original data file.")
+            cms_verify_out.set("✗ ERROR: detached .p7s requires original data file.")
             return
         res = cms_verify(sig_path, data_path, ca_path)
         info = res.get("signer_info", {})
@@ -647,10 +664,10 @@ def do_cms_verify():
             f"Time   : {info.get('signingTime')}",
         ]
         cms_verify_out.set("\n".join(lines))
-        set_status("CMS verification complete")
+        set_status("✓ CMS verification complete")
     except Exception as e:
         cms_verify_out.set(f"✗ CMS verify error:\n{e}")
-        set_status("CMS verification error")
+        set_status("✗ CMS verification error")
 
 btn_row_v = ttk.Frame(cms_verify_tab); btn_row_v.pack(anchor='w', pady=6)
 ttk.Button(btn_row_v, text='← Verify', command=do_cms_verify).pack(side='left', padx=8)
@@ -673,10 +690,10 @@ def do_show_oids():
     if not path: return
     try:
         tools_out.set(cert_show_oids(path))
-        set_status("OIDs extracted")
+        set_status("✓ OIDs extracted")
     except Exception as e:
         tools_out.set(f"✗ OID parse error:\n{e}")
-        set_status("OIDs error")
+        set_status("✗ OIDs error")
 
 def do_cert_to_der():
     inp = filedialog.askopenfilename(parent=cms_tools_tab, title='Select certificate (PEM)',
@@ -688,7 +705,7 @@ def do_cert_to_der():
     if not out: return
     try:
         tools_out.set("Saved: " + cert_pem_to_der(inp, out))
-        set_status("Cert → DER saved")
+        set_status("✓ Cert → DER saved")
     except Exception as e:
         tools_out.set(f"✗ Convert error:\n{e}")
 
@@ -702,7 +719,7 @@ def do_cert_to_pem():
     if not out: return
     try:
         tools_out.set("Saved: " + cert_der_to_pem(inp, out))
-        set_status("Cert → PEM saved")
+        set_status("✓ Cert → PEM saved")
     except Exception as e:
         tools_out.set(f"✗ Convert error:\n{e}")
 
@@ -716,12 +733,11 @@ def do_key_to_der():
     if not out: return
     pwd = None
     if tk.messagebox.askyesno("Key password", "Is the input key encrypted with a password?"):
-        # Simple prompt
         pw = tk.simpledialog.askstring("Key password", "Enter password:", show="*")
         pwd = pw or None
     try:
         tools_out.set("Saved: " + key_pem_to_der_pkcs8(inp, out, password=pwd))
-        set_status("Key → DER saved")
+        set_status("✓ Key → DER saved")
     except Exception as e:
         tools_out.set(f"✗ Convert error:\n{e}")
 
@@ -739,7 +755,7 @@ def do_key_to_pem():
         pwd = pw or None
     try:
         tools_out.set("Saved: " + key_der_to_pem_pkcs8(inp, out, password=pwd))
-        set_status("Key → PEM saved")
+        set_status("✓ Key → PEM saved")
     except Exception as e:
         tools_out.set(f"✗ Convert error:\n{e}")
 

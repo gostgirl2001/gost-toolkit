@@ -10,4 +10,8 @@
 
 ## Notes
 - CTR requires a unique IV for every encryption with the same key
-- Requires gostcrypto==1.2.5 (Python) and OpenSSL 1.1.1 with GOST engine (.deb build 'openssl-gost' available under Releases)
+- Requires gostcrypto==1.2.5 (Python) and OpenSSL 1.1.1u with GOST engine
+
+## Important
+- The use of CMS features requires a GOST-enabled OpenSSL build.  
+- A prebuilt .deb package (openssl-gost) is available under Releases.
